@@ -130,7 +130,7 @@ const COMMODITIES = [
   { name: 'Bootleg Liquor',                 name_fr: 'Alcool de Contrebande',                     category: 'Legal Drugs' },
   { name: 'Onionhead Gamma Strain',         name_fr: 'Onionhead Souche Gamma',                    category: 'Legal Drugs' },
   // Machinerie
-  { name: 'Power Generators',               name_fr: "Générateurs",                     category: 'Machinery' },
+  { name: 'Power Generators',               name_fr: "Générateurs d'énergie",                     category: 'Machinery' },
   { name: 'Water Purifiers',                name_fr: "Purificateurs d'Eau",                       category: 'Machinery' },
   { name: 'Microbial Furnaces',             name_fr: 'Fours Microbiens',                          category: 'Machinery' },
   { name: 'Mineral Extractors',             name_fr: 'Extracteurs Minéraux',                      category: 'Machinery' },
@@ -642,15 +642,28 @@ function buildResourceRow(resource, chantier, panel) {
   else if (isLoading)  badgeHtml = '<span class="badge badge-loading">EN TRANSIT</span>';
   else                 badgeHtml = '<span class="badge badge-idle">EN ATTENTE</span>';
 
+  // Quantité proposée par défaut = min(soute, restant)
+  const cap         = parseInt(document.getElementById('ship-capacity').value, 10) || 1216;
+  const defaultLoad = Math.min(cap, resource.remainingQuantity);
+
   // Action buttons
   let actionsHtml;
   if (isLoading) {
+    const loadedAmt = resource.remainingQuantity - loadingStates[resource.id].tempRemaining;
     actionsHtml = `
+      <span class="load-qty-badge">${loadedAmt.toLocaleString('fr-FR')} u.</span>
       <button class="btn btn-deliver js-btn-deliver">✓ LIVRÉ</button>
       <button class="btn btn-fail    js-btn-fail">✕ RATÉ</button>
     `;
   } else {
     actionsHtml = `
+      <input type="number"
+             class="load-qty-input js-load-qty"
+             value="${isDone ? 0 : defaultLoad}"
+             min="1"
+             max="${resource.remainingQuantity}"
+             ${isDone ? 'disabled' : ''}
+             title="Quantité à charger">
       <button class="btn btn-load js-btn-load" ${isDone ? 'disabled' : ''}>⬆ CHARGER</button>
       <button class="btn btn-delete-res js-btn-del-res" title="Supprimer la ressource">✕</button>
     `;
@@ -696,13 +709,25 @@ function buildResourceRow(resource, chantier, panel) {
     // CHARGER
     if (!isDone) {
       tr.querySelector('.js-btn-load').addEventListener('click', () => {
-        const cap     = parseInt(document.getElementById('ship-capacity').value, 10) || 1216;
-        const loadAmt = Math.min(cap, resource.remainingQuantity);
+        const qtyInput    = tr.querySelector('.js-load-qty');
+        const requested   = parseInt(qtyInput?.value, 10) || 0;
+        const loadAmt     = Math.max(1, Math.min(requested, resource.remainingQuantity));
+
+        if (requested <= 0 || isNaN(requested)) {
+          flash(qtyInput);
+          return;
+        }
+
         loadingStates[resource.id] = {
           tempRemaining: resource.remainingQuantity - loadAmt,
         };
         rebuildResourceRows(chantier, panel);
         showToast(`Chargement de ${loadAmt.toLocaleString('fr-FR')} unités — en transit.`, 'info');
+      });
+
+      // Valider avec Entrée depuis le champ quantité
+      tr.querySelector('.js-load-qty').addEventListener('keydown', e => {
+        if (e.key === 'Enter') tr.querySelector('.js-btn-load').click();
       });
     }
 

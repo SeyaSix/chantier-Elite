@@ -832,6 +832,44 @@ body {
   box-shadow: 0 0 12px rgba(224, 36, 72, 0.45);
 }
 
+/* Champ de quantité à charger (sur chaque ligne ressource) */
+.load-qty-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-bright);
+  font-family: var(--font-hud);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+  width: 80px;
+  text-align: right;
+  outline: none;
+  clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.load-qty-input:focus {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.load-qty-input:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+/* Badge affiché en mode "EN TRANSIT" pour rappeler la qté chargée */
+.load-qty-badge {
+  font-family: var(--font-hud);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid rgba(240, 160, 32, 0.4);
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
 /* Delete icon (tiny) */
 .btn-delete-res {
   background: transparent;
