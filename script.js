@@ -379,6 +379,11 @@ async function init() {
     shipCapacity = Math.max(1, parseInt(e.target.value, 10) || 1);
     e.target.value = shipCapacity;
     localStorage.setItem('ed_shipCapacity', shipCapacity);
+
+    // Re-sync les champs de quantité si un panneau est affiché
+    const activePanel  = document.querySelector('.chantier-panel');
+    const activeChantier = getActive();
+    if (activePanel && activeChantier) syncLoadQtyInputs(activeChantier, activePanel);
   });
 
   document.getElementById('btn-new-chantier').addEventListener('click', createChantier);
@@ -486,7 +491,16 @@ function buildChantierPanel(chantier) {
 
     <!-- Liste des ressources -->
     <div class="panel-section">
-      <div class="section-title">LISTE DES RESSOURCES</div>
+      <div class="section-title">
+        LISTE DES RESSOURCES
+        <div class="soute-bar js-soute-bar">
+          <span class="soute-bar-label">SOUTE</span>
+          <div class="soute-bar-track">
+            <div class="soute-bar-fill js-soute-fill" style="width:0%"></div>
+          </div>
+          <span class="soute-bar-text js-soute-text">— / —</span>
+        </div>
+      </div>
       <div class="table-wrapper">
         <table class="resources-table">
           <thead>
@@ -617,6 +631,61 @@ function rebuildResourceRows(chantier, panel) {
   chantier.resources.forEach(resource => {
     tbody.appendChild(buildResourceRow(resource, chantier, panel));
   });
+
+  syncLoadQtyInputs(chantier, panel);
+}
+
+/**
+ * Synchronise les champs de quantité à charger avec le budget soute commun.
+ * Recalcule le max de chaque input en soustrayant ce que les autres ont déjà alloué.
+ * Met à jour l'indicateur de soute dans le header de la section.
+ */
+function syncLoadQtyInputs(chantier, panel) {
+  const cap    = parseInt(document.getElementById('ship-capacity').value, 10) || 1216;
+  const inputs = Array.from(panel.querySelectorAll('.js-load-qty:not(:disabled)'));
+
+  function update() {
+    const totalAllocated = inputs.reduce((sum, inp) => sum + (parseInt(inp.value, 10) || 0), 0);
+
+    const free = cap - totalAllocated;
+
+    inputs.forEach(inp => {
+      const rid      = inp.closest('tr')?.dataset.rid;
+      const resource = chantier.resources.find(r => r.id === rid);
+      if (!resource) return;
+
+      const myVal      = parseInt(inp.value, 10) || 0;
+      const others     = totalAllocated - myVal;
+      const availForMe = Math.max(0, cap - others);
+      const newMax     = Math.min(availForMe, resource.remainingQuantity);
+
+      inp.max = newMax;
+
+      // Écrêter si la valeur dépasse le nouveau max
+      if (myVal > newMax) inp.value = newMax;
+
+      // Coloration du champ selon l'état
+      inp.classList.toggle('qty-at-limit', myVal >= newMax && newMax > 0);
+    });
+
+    // --- Indicateur de soute ---
+    const fill = panel.querySelector('.js-soute-fill');
+    const text = panel.querySelector('.js-soute-text');
+    if (!fill || !text) return;
+
+    const used    = Math.min(totalAllocated, cap);
+    const pct     = cap > 0 ? Math.round(used / cap * 100) : 0;
+    const isOver  = totalAllocated > cap;
+
+    fill.style.width = Math.min(pct, 100) + '%';
+    fill.className = `soute-bar-fill js-soute-fill${isOver ? ' is-over' : pct >= 80 ? ' is-warn' : ''}`;
+
+    text.textContent = `${used.toLocaleString('fr-FR')} / ${cap.toLocaleString('fr-FR')} — LIBRE : ${Math.max(0, free).toLocaleString('fr-FR')}`;
+    text.className   = `soute-bar-text js-soute-text${isOver ? ' is-over' : ''}`;
+  }
+
+  inputs.forEach(inp => inp.addEventListener('input', update));
+  update();
 }
 
 function buildResourceRow(resource, chantier, panel) {
@@ -642,9 +711,7 @@ function buildResourceRow(resource, chantier, panel) {
   else if (isLoading)  badgeHtml = '<span class="badge badge-loading">EN TRANSIT</span>';
   else                 badgeHtml = '<span class="badge badge-idle">EN ATTENTE</span>';
 
-  // Quantité proposée par défaut = min(soute, restant)
-  const cap         = parseInt(document.getElementById('ship-capacity').value, 10) || 1216;
-  const defaultLoad = Math.min(cap, resource.remainingQuantity);
+  const cap = parseInt(document.getElementById('ship-capacity').value, 10) || 1216;
 
   // Action buttons
   let actionsHtml;
@@ -659,11 +726,12 @@ function buildResourceRow(resource, chantier, panel) {
     actionsHtml = `
       <input type="number"
              class="load-qty-input js-load-qty"
-             value="${isDone ? 0 : defaultLoad}"
+             value=""
+             placeholder="0"
              min="1"
              max="${resource.remainingQuantity}"
              ${isDone ? 'disabled' : ''}
-             title="Quantité à charger">
+             title="Quantité à charger (laisser vide = max disponible)">
       <button class="btn btn-load js-btn-load" ${isDone ? 'disabled' : ''}>⬆ CHARGER</button>
       <button class="btn btn-delete-res js-btn-del-res" title="Supprimer la ressource">✕</button>
     `;
@@ -709,12 +777,23 @@ function buildResourceRow(resource, chantier, panel) {
     // CHARGER
     if (!isDone) {
       tr.querySelector('.js-btn-load').addEventListener('click', () => {
-        const qtyInput    = tr.querySelector('.js-load-qty');
-        const requested   = parseInt(qtyInput?.value, 10) || 0;
-        const loadAmt     = Math.max(1, Math.min(requested, resource.remainingQuantity));
+        const qtyInput  = tr.querySelector('.js-load-qty');
+        const typed     = parseInt(qtyInput?.value, 10);
 
-        if (requested <= 0 || isNaN(requested)) {
-          flash(qtyInput);
+        // Si vide ou 0 → prend le max disponible (soute libre vs restant)
+        let loadAmt;
+        if (!typed || typed <= 0) {
+          const totalAllocated = Array.from(
+            panel.querySelectorAll('.js-load-qty:not(:disabled)')
+          ).reduce((sum, inp) => inp !== qtyInput ? sum + (parseInt(inp.value, 10) || 0) : sum, 0);
+          const freeCapacity = Math.max(0, cap - totalAllocated);
+          loadAmt = Math.min(freeCapacity, resource.remainingQuantity);
+        } else {
+          loadAmt = Math.min(typed, resource.remainingQuantity);
+        }
+
+        if (loadAmt <= 0) {
+          showToast('Soute pleine — libérez de la place avant de charger.', 'danger');
           return;
         }
 
